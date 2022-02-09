@@ -2,12 +2,16 @@ import { PlatformAccessory } from 'homebridge';
 
 import { LitterRobotPlatform } from './platform';
 
+import { MAX_TIME_BETWEEN_READY } from './settings';
+
 /**
  * Platform Accessory
  * An instance of this class is created for each accessory your platform registers
  * Each accessory may expose multiple services of different service types.
  */
 export class LitterRobotPlatformAccessory {
+
+  private lastReady: number = Date.now();
 
   constructor(
     private readonly platform: LitterRobotPlatform,
@@ -85,7 +89,7 @@ export class LitterRobotPlatformAccessory {
 
 
       occupancyService.getCharacteristic(this.platform.Characteristic.Name)
-        .on('get', callback => callback(null, `${accessory.displayName} CS Name`));
+        .on('get', callback => callback(null, `${accessory.displayName} Cat Sensor`));
 
     }
 
@@ -132,7 +136,7 @@ export class LitterRobotPlatformAccessory {
     //3. Fudge an Occupancy Sensor
     const occupancyService = accessory.getService(this.platform.Service.OccupancySensor);
     if (occupancyService) {
-      const occupancy = robot.unitStatus.startsWith('DF');
+      const occupancy = this.isStatusOccupied(robot.unitStatus);
       this.platform.log.debug(JSON.stringify(robot, null, 2));
 
       const active = this.isStatusActive(robot.unitStatus);
@@ -241,7 +245,7 @@ export class LitterRobotPlatformAccessory {
 
     let occupancy = false;
     if (robot) {
-      occupancy = robot.unitStatus.startsWith('DF');
+      occupancy = this.isStatusOccupied(robot.unitStatus);
     }
     callback(null, occupancy);
 
@@ -261,6 +265,10 @@ export class LitterRobotPlatformAccessory {
     }
 
     return status;
+  }
+
+  isStatusOccupied(unitStatus) {
+    return unitStatus.startsWith('DF') || ['CST', 'CSF', 'CSI'].indexOf(unitStatus) >= 0;
   }
 
   async getStatusActive(accessory, callback) {
@@ -285,8 +293,17 @@ export class LitterRobotPlatformAccessory {
   }
 
   isStatusFault(unitStatus) {
+    const now = Date.now();
+
+    if (unitStatus !== 'RDY' && now - this.lastReady > MAX_TIME_BETWEEN_READY) {
+      return true;
+    } else if (unitStatus === 'RDY') {
+      this.lastReady = now;
+    }
+
     let status = false;
     switch(unitStatus) {
+      case 'CSF':
       case 'DF1':
       case 'DF2':
       case 'DFS':
